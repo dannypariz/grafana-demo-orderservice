@@ -28,8 +28,6 @@ spec:
               value: "order-service"
             - name: INVENTORY_SERVICE_URL
               value: "http://inventory-service:8080"
-            - name: BUG_ENABLED
-              value: "false"
             - name: K8S_POD_IP
               valueFrom:
                 fieldRef:
