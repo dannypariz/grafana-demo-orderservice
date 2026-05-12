@@ -46,8 +46,8 @@ manifest_has_bug_true() {
 restore_bug_in_repo_via_pr() {
   cd "$REPO_ROOT"
 
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "ERROR: working tree has uncommitted changes — commit or stash before --reset" >&2
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "ERROR: working tree has uncommitted changes to tracked files — commit or stash before --reset" >&2
     git status --short >&2
     exit 1
   fi
