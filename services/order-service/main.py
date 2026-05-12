@@ -13,6 +13,7 @@ import httpx
 
 app = FastAPI(title="order-service")
 
+BUG_ENABLED = os.getenv("BUG_ENABLED", "false").lower() == "true"
 INVENTORY_URL = os.getenv("INVENTORY_SERVICE_URL", "http://inventory-service:8080")
 
 ORDERS = {
@@ -27,20 +28,28 @@ ORDERS = {
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "order-service"}
+    return {"status": "ok", "service": "order-service", "bug_enabled": BUG_ENABLED}
 
 
 @app.get("/orders/{order_id}")
 async def get_order(order_id: str):
-    logger.info("get_order order_id=%s", order_id)
+    logger.info("get_order order_id=%s bug_enabled=%s", order_id, BUG_ENABLED)
     order = ORDERS.get(order_id)
     if not order:
         raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
 
-    # Single batch call — ~80ms regardless of item count
-    ids = ",".join(order["item_ids"])
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{INVENTORY_URL}/items/batch?ids={ids}", timeout=10.0)
-        items = r.json()
+    items = []
+    if BUG_ENABLED:
+        # N+1 bug: one HTTP call per item, each ~80ms → N×80ms total latency
+        async with httpx.AsyncClient() as client:
+            for item_id in order["item_ids"]:
+                r = await client.get(f"{INVENTORY_URL}/items/{item_id}", timeout=10.0)
+                items.append(r.json())
+    else:
+        # Fix: single batch call — ~80ms regardless of item count
+        ids = ",".join(order["item_ids"])
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{INVENTORY_URL}/items/batch?ids={ids}", timeout=10.0)
+            items = r.json()
 
     return {"order": order, "items": items}
