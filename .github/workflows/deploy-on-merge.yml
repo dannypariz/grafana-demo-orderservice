@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'k8s/order-service.yaml'
+      - 'services/order-service/**'
 
 permissions:
   contents: read
@@ -14,7 +15,7 @@ permissions:
 
 jobs:
   deploy-fix:
-    # Fire on any merged PR that touches k8s/order-service.yaml with BUG_ENABLED=false
+    # Fire on any merged PR that touches order-service code or manifest
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     environment: production
@@ -23,14 +24,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Guard — only deploy if BUG_ENABLED is being set to false
+      - name: Guard — only deploy if the fix is in place (BUG_ENABLED absent or false)
         id: guard
         run: |
-          if grep -A1 'name: BUG_ENABLED' k8s/order-service.yaml | grep -q 'value: "false"'; then
-            echo "BUG_ENABLED=false confirmed in k8s/order-service.yaml — proceeding with deploy"
+          if ! grep -q 'name: BUG_ENABLED' k8s/order-service.yaml; then
+            echo "BUG_ENABLED not present in manifest (fix removed it) — proceeding with deploy"
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          elif grep -A1 'name: BUG_ENABLED' k8s/order-service.yaml | grep -q 'value: "false"'; then
+            echo "BUG_ENABLED=false confirmed in manifest — proceeding with deploy"
             echo "should_deploy=true" >> "$GITHUB_OUTPUT"
           else
-            echo "k8s/order-service.yaml changed but BUG_ENABLED is not false — skipping deploy"
+            echo "BUG_ENABLED is still true in manifest — skipping deploy"
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -45,24 +49,28 @@ jobs:
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
 
-      - name: Patch order-service — disable N+1 bug + stamp fix version
+      - name: Apply manifest (source of truth)
+        if: steps.guard.outputs.should_deploy == 'true'
+        run: kubectl apply -f k8s/order-service.yaml
+
+      - name: Stamp service.version and force rollout to pull latest image
         if: steps.guard.outputs.should_deploy == 'true'
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
-          kubectl patch deployment order-service \
-            -n grafana-demo \
-            --type=strategic \
-            -p="{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"order-service\",\"env\":[{\"name\":\"BUG_ENABLED\",\"value\":\"false\"},{\"name\":\"SERVICE_VERSION\",\"value\":\"${SHORT_SHA}-fix\"}]}]}}}}"
+          kubectl set env deployment/order-service -n grafana-demo \
+            SERVICE_VERSION="${SHORT_SHA}-fix"
+          kubectl rollout restart deployment/order-service -n grafana-demo
 
       - name: Wait for rollout
         if: steps.guard.outputs.should_deploy == 'true'
-        run: kubectl rollout status deployment/order-service -n grafana-demo --timeout=120s
+        run: kubectl rollout status deployment/order-service -n grafana-demo --timeout=180s
 
       - name: Verify fix is live
         if: steps.guard.outputs.should_deploy == 'true'
         run: |
           POD=$(kubectl get pod -n grafana-demo -l app=order-service -o jsonpath='{.items[0].metadata.name}')
-          kubectl exec -n grafana-demo "$POD" -- env | grep -E "BUG_ENABLED|SERVICE_VERSION"
+          echo "Running pod: $POD"
+          kubectl exec -n grafana-demo "$POD" -- env | grep -E "BUG_ENABLED|SERVICE_VERSION" || echo "(BUG_ENABLED removed — expected after fix)"
 
       - name: Post Grafana annotation — fix deployed
         if: steps.guard.outputs.should_deploy == 'true'
@@ -79,7 +87,7 @@ jobs:
           curl -sf -X POST \
             -H "Authorization: Bearer $GRAFANA_SA_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"dashboardUID\":\"order-service-n-plus-one-demo\",\"tags\":[\"demo\",\"fix\"],\"text\":\"Fix deployed — BUG_ENABLED=false, service.version=${SHORT_SHA}-fix\",\"time\":${NOW_MS}}" \
+            -d "{\"dashboardUID\":\"order-service-n-plus-one-demo\",\"tags\":[\"demo\",\"fix\"],\"text\":\"Fix deployed — service.version=${SHORT_SHA}-fix (PR #${{ github.event.pull_request.number }})\",\"time\":${NOW_MS}}" \
             "https://albertito.grafana.net/api/annotations" \
             && echo "Grafana annotation posted." || echo "Annotation failed (non-fatal)"
 
@@ -92,5 +100,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ **Fix deployed to production** — `BUG_ENABLED=false` applied to `order-service` in `grafana-demo`. Latency should drop from ~950ms to ~100ms. Check App Observability to compare `service.version` before/after.'
+              body: '✅ **Fix deployed to production** — manifest applied + new `service.version` stamped. Latency should drop from ~950ms to ~100ms. Check App Observability to compare `service.version` before/after.'
             })
