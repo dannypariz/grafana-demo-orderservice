@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: frontend-api
-          image: ghcr.io/albert0fg/grafana-demo-orderservice/frontend-api:latest
+          image: ${GHCR_IMAGE_PREFIX}/frontend-api:latest
           ports:
             - containerPort: 8080
           env:

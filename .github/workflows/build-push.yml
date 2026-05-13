@@ -55,7 +55,7 @@ jobs:
           context: services
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ghcr.io/albert0fg/grafana-demo-orderservice/${{ matrix.service }}:latest
+          tags: ghcr.io/${{ github.repository }}/${{ matrix.service }}:latest
           build-args: GIT_SHA=${{ env.SHORT_SHA }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
@@ -66,16 +66,18 @@ jobs:
         with:
           context: ${{ matrix.context }}
           push: true
-          tags: ghcr.io/albert0fg/grafana-demo-orderservice/${{ matrix.service }}:latest
+          tags: ghcr.io/${{ github.repository }}/${{ matrix.service }}:latest
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
       - name: Make package public
         run: |
+          # Repo name is the second segment of github.repository (owner/repo)
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
           for svc in frontend-api order-service inventory-service load-generator; do
             gh api --method PATCH \
               -H "Accept: application/vnd.github+json" \
-              "/user/packages/container/grafana-demo-orderservice%2F${svc}" \
+              "/user/packages/container/${REPO_NAME}%2F${svc}" \
               -f visibility=public 2>/dev/null || true
           done
         env:

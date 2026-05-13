@@ -1,0 +1,96 @@
+{
+  "uid": "order-svc-checkout-latency",
+  "orgID": 1,
+  "folderUID": "order-service-demo",
+  "ruleGroup": "latency",
+  "title": "frontend-api checkout latency high",
+  "condition": "C",
+  "data": [
+    {
+      "refId": "A",
+      "queryType": "",
+      "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+      },
+      "datasourceUid": "grafanacloud-prom",
+      "model": {
+        "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"frontend-api\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"GET /checkout/{order_id}\"}[5m])))",
+        "instant": false,
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "refId": "A"
+      }
+    },
+    {
+      "refId": "B",
+      "queryType": "",
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
+      "datasourceUid": "__expr__",
+      "model": {
+        "conditions": [
+          {
+            "evaluator": { "params": [], "type": "gt" },
+            "operator": { "type": "and" },
+            "query": { "params": ["B"] },
+            "reducer": { "params": [], "type": "last" },
+            "type": "query"
+          }
+        ],
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "expression": "A",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "reducer": "last",
+        "refId": "B",
+        "type": "reduce"
+      }
+    },
+    {
+      "refId": "C",
+      "queryType": "",
+      "relativeTimeRange": {
+        "from": 0,
+        "to": 0
+      },
+      "datasourceUid": "__expr__",
+      "model": {
+        "conditions": [
+          {
+            "evaluator": { "params": [0.3], "type": "gt" },
+            "operator": { "type": "and" },
+            "query": { "params": ["C"] },
+            "reducer": { "params": [], "type": "last" },
+            "type": "query"
+          }
+        ],
+        "datasource": { "type": "__expr__", "uid": "__expr__" },
+        "expression": "B",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "refId": "C",
+        "type": "threshold"
+      }
+    }
+  ],
+  "noDataState": "NoData",
+  "execErrState": "Error",
+  "for": "1m",
+  "keep_firing_for": "0s",
+  "annotations": {
+    "description": "p99 latency of the /checkout endpoint is {{ humanizeDuration $values.B.Value }}. Possible N+1 bug in order-service — each order makes N individual calls to inventory-service instead of a single batch call.",
+    "runbook_url": "https://${GRAFANA_HOST}/a/grafana-app-observability-app/services/frontend-api?from=now-30m&to=now",
+    "summary": "frontend-api checkout p99 latency > 300ms"
+  },
+  "labels": {
+    "demo": "order-service",
+    "severity": "critical",
+    "team": "backend"
+  },
+  "isPaused": false,
+  "notification_settings": null,
+  "record": null
+}

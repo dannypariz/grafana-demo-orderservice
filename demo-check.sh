@@ -3,9 +3,22 @@
 # Run this before presenting to catch problems early.
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+if [ ! -f "$REPO_ROOT/.env" ]; then
+  echo "ERROR: $REPO_ROOT/.env not found. Copy .env.example to .env and fill it in." >&2
+  exit 1
+fi
+# shellcheck disable=SC1091
+set -a; . "$REPO_ROOT/.env"; set +a
+
+: "${GRAFANA_HOST:?GRAFANA_HOST not set in .env}"
+: "${GCX_CONTEXT:?GCX_CONTEXT not set in .env}"
+: "${ALERT_RULE_UID:?ALERT_RULE_UID not set in .env}"
+: "${DASHBOARD_UID:?DASHBOARD_UID not set in .env}"
+
 NAMESPACE="grafana-demo"
-GRAFANA_URL="https://albertito.grafana.net"
-ALERT_RULE_UID="dfku265tgj11ca"
+GRAFANA_URL="https://${GRAFANA_HOST}"
 GCX_CONFIG="${HOME}/.config/gcx/config.yaml"
 PASS=0
 FAIL=0
@@ -86,10 +99,10 @@ if [ ! -f "$GCX_CONFIG" ]; then
   warn "skipped — gcx config not found at $GCX_CONFIG"
 else
   SA_TOKEN=$(python3 -c \
-    "import yaml; c=yaml.safe_load(open('$GCX_CONFIG')); print(c['contexts']['albertito']['token'])" \
+    "import yaml; c=yaml.safe_load(open('$GCX_CONFIG')); print(c['contexts']['$GCX_CONTEXT']['token'])" \
     2>/dev/null || echo "")
   if [ -z "$SA_TOKEN" ]; then
-    warn "skipped — could not read SA token from gcx config"
+    warn "skipped — could not read SA token from gcx config for context '$GCX_CONTEXT'"
   else
     STATE=$(curl -s \
       -H "Authorization: Bearer $SA_TOKEN" \
@@ -137,11 +150,11 @@ if [ "$FAIL" -eq 0 ]; then
   printf '\033[0;32m  ✓ Ready to demo! (%d checks passed)\033[0m\n' "$PASS"
   echo ""
   echo "  Quick-access URLs:"
-  echo "  Alert:     https://albertito.grafana.net/alerting/grafana/dfku265tgj11ca/view"
-  echo "  Dashboard: https://albertito.grafana.net/d/order-service-n-plus-one-demo"
-  echo "  App O11y:  https://albertito.grafana.net/a/grafana-app-observability-app/services"
+  echo "  Alert:     ${GRAFANA_URL}/alerting/grafana/${ALERT_RULE_UID}/view"
+  echo "  Dashboard: ${GRAFANA_URL}/d/${DASHBOARD_UID}"
+  echo "  App O11y:  ${GRAFANA_URL}/a/grafana-app-observability-app/services"
   echo ""
-  echo "  Start with: \"Hay una alerta crítica disparada, investiga qué está pasando\""
+  echo "  Start with: \"There's a critical alert firing, investigate what's happening.\""
   echo ""
   # Mark demo start on the dashboard timeline
   if command -v gcx &>/dev/null; then
@@ -152,7 +165,7 @@ kind: Annotation
 metadata:
   name: "demo-start-$(date +%s)"
 spec:
-  dashboardUID: order-service-n-plus-one-demo
+  dashboardUID: ${DASHBOARD_UID}
   tags: [demo, start]
   text: "Demo started"
   time: $(date +%s)000

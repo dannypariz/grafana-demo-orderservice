@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # deploy.sh — Grafana Cloud demo deployment helper
 #
+# Reads configuration from ./.env (see .env.example). Templated k8s manifests
+# are rendered with envsubst before being applied.
+#
 # Usage:
 #   ./deploy.sh             Deploy everything (BUG_ENABLED comes from k8s/order-service.yaml)
 #   ./deploy.sh --reset     Restore main to BUG_ENABLED=true via PR, then sync cluster.
@@ -13,7 +16,28 @@ NAMESPACE="grafana-demo"
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 K8S_DIR="$REPO_ROOT/k8s"
 GRAFANA_DIR="$REPO_ROOT/grafana"
-DASHBOARD_UID="order-service-n-plus-one-demo"
+
+# ── Load .env ────────────────────────────────────────
+if [ ! -f "$REPO_ROOT/.env" ]; then
+  echo "ERROR: $REPO_ROOT/.env not found. Copy .env.example to .env and fill it in." >&2
+  exit 1
+fi
+# shellcheck disable=SC1091
+set -a; . "$REPO_ROOT/.env"; set +a
+
+: "${GITHUB_OWNER:?GITHUB_OWNER not set in .env}"
+: "${GITHUB_REPO:?GITHUB_REPO not set in .env}"
+: "${GHCR_IMAGE_PREFIX:?GHCR_IMAGE_PREFIX not set in .env}"
+: "${GRAFANA_HOST:?GRAFANA_HOST not set in .env}"
+: "${DASHBOARD_UID:?DASHBOARD_UID not set in .env}"
+
+command -v envsubst >/dev/null || { echo "ERROR: envsubst not found (install gettext)" >&2; exit 1; }
+
+# Render a manifest with env vars and apply it
+apply_template() {
+  local f="$1"
+  envsubst '${GHCR_IMAGE_PREFIX}' < "$f" | kubectl apply -f -
+}
 
 # Post a Grafana annotation to the demo dashboard (requires gcx; silent on failure)
 post_annotation() {
@@ -105,7 +129,7 @@ PY
 sync_cluster_to_manifest() {
   cd "$REPO_ROOT"
   echo "Syncing cluster with k8s/order-service.yaml..."
-  kubectl apply -f "$K8S_DIR/order-service.yaml"
+  apply_template "$K8S_DIR/order-service.yaml"
   kubectl set env deployment/order-service -n "$NAMESPACE" SERVICE_VERSION="$(git rev-parse --short HEAD)"
   kubectl rollout restart deployment/order-service -n "$NAMESPACE"
   kubectl rollout status deployment/order-service -n "$NAMESPACE" --timeout=180s
@@ -130,10 +154,10 @@ case "${1:-}" in
   "")
     echo "Deploying Grafana demo to namespace: $NAMESPACE"
     kubectl apply -f "$K8S_DIR/namespace.yaml"
-    kubectl apply -f "$K8S_DIR/inventory-service.yaml"
-    kubectl apply -f "$K8S_DIR/order-service.yaml"
-    kubectl apply -f "$K8S_DIR/frontend-api.yaml"
-    kubectl apply -f "$K8S_DIR/load-generator.yaml"
+    apply_template "$K8S_DIR/inventory-service.yaml"
+    apply_template "$K8S_DIR/order-service.yaml"
+    apply_template "$K8S_DIR/frontend-api.yaml"
+    apply_template "$K8S_DIR/load-generator.yaml"
 
     echo ""
     echo "Waiting for deployments to be ready..."

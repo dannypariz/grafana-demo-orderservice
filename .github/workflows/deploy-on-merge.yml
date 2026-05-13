@@ -51,7 +51,10 @@ jobs:
 
       - name: Apply manifest (source of truth)
         if: steps.guard.outputs.should_deploy == 'true'
-        run: kubectl apply -f k8s/order-service.yaml
+        env:
+          GHCR_IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+        run: |
+          envsubst '${GHCR_IMAGE_PREFIX}' < k8s/order-service.yaml | kubectl apply -f -
 
       - name: Stamp service.version and force rollout to pull latest image
         if: steps.guard.outputs.should_deploy == 'true'
@@ -77,9 +80,11 @@ jobs:
         continue-on-error: true
         env:
           GRAFANA_SA_TOKEN: ${{ secrets.GRAFANA_SA_TOKEN }}
+          GRAFANA_HOST: ${{ vars.GRAFANA_HOST }}
+          DASHBOARD_UID: ${{ vars.DASHBOARD_UID }}
         run: |
-          if [ -z "${GRAFANA_SA_TOKEN:-}" ]; then
-            echo "GRAFANA_SA_TOKEN secret not set — skipping annotation"
+          if [ -z "${GRAFANA_SA_TOKEN:-}" ] || [ -z "${GRAFANA_HOST:-}" ] || [ -z "${DASHBOARD_UID:-}" ]; then
+            echo "GRAFANA_SA_TOKEN secret / vars.GRAFANA_HOST / vars.DASHBOARD_UID missing — skipping annotation"
             exit 0
           fi
           SHORT_SHA="${GITHUB_SHA::7}"
@@ -87,8 +92,8 @@ jobs:
           curl -sf -X POST \
             -H "Authorization: Bearer $GRAFANA_SA_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"dashboardUID\":\"order-service-n-plus-one-demo\",\"tags\":[\"demo\",\"fix\"],\"text\":\"Fix deployed — service.version=${SHORT_SHA}-fix (PR #${{ github.event.pull_request.number }})\",\"time\":${NOW_MS}}" \
-            "https://albertito.grafana.net/api/annotations" \
+            -d "{\"dashboardUID\":\"${DASHBOARD_UID}\",\"tags\":[\"demo\",\"fix\"],\"text\":\"Fix deployed — service.version=${SHORT_SHA}-fix (PR #${{ github.event.pull_request.number }})\",\"time\":${NOW_MS}}" \
+            "https://${GRAFANA_HOST}/api/annotations" \
             && echo "Grafana annotation posted." || echo "Annotation failed (non-fatal)"
 
       - name: Comment on PR

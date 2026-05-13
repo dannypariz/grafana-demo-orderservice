@@ -1,13 +1,16 @@
 # Grafana Assistant Demo Prompts
 
-5 prompts in Spanish, one sentence each. Use them in order after running
+5 prompts, one sentence each. Use them in order after running
 `./demo-check.sh` and confirming the alert is Firing.
+
+> Replace `<your-org>/<your-repo>` in Prompt 4 with your own GitHub fork
+> (e.g. the `GITHUB_OWNER` and `GITHUB_REPO` from your `.env`).
 
 ---
 
 ## Prompt 1
 
-Hay una alerta crítica disparada en Grafana, analiza qué está pasando.
+There's a critical alert firing in Grafana, analyze what's happening.
 
 > **What happens:** Assistant reads the firing alert context, queries
 > `traces_spanmetrics_latency_bucket` for `frontend-api`, and confirms p99
@@ -17,7 +20,7 @@ Hay una alerta crítica disparada en Grafana, analiza qué está pasando.
 
 ## Prompt 2
 
-Muéstrame el service map de los últimos 10 minutos y dime qué servicio genera más spans.
+Show me the service map for the last 10 minutes and tell me which service generates the most spans.
 
 > **What happens:** Assistant opens the Tempo service map, identifies the chain
 > `frontend-api → order-service → inventory-service`, and flags that
@@ -28,7 +31,7 @@ Muéstrame el service map de los últimos 10 minutos y dime qué servicio genera
 
 ## Prompt 3
 
-Busca trazas de order-service donde haya más de 5 llamadas a inventory-service en un solo request.
+Find traces from order-service where there are more than 5 calls to inventory-service in a single request.
 
 > **What happens:** Assistant queries Tempo for traces where `order-service`
 > fans out into many child spans. It surfaces order-6 (10 items, ~1s total) and
@@ -39,9 +42,9 @@ Busca trazas de order-service donde haya más de 5 llamadas a inventory-service 
 
 ## Prompt 4
 
-Usa el MCP de GitHub para crear un PR en albert0fg/grafana-demo-orderservice que corrija el bug N+1 en order-service. El fix debe ser únicamente cambiar el valor de BUG_ENABLED a "false" en el fichero k8s/order-service.yaml. No toques el código Python.
+Use the GitHub MCP to create a PR in `<your-org>/<your-repo>` that fixes the N+1 bug in order-service. The fix must only modify the file `k8s/order-service.yaml`. Do not touch the Python code.
 
-> **What happens:** Assistant uses GitHub MCP to create branch
+> **What happens:** Assistant uses GitHub MCP to create a branch
 > `fix/order-service-n-plus-one`, commits **only** `k8s/order-service.yaml`
 > changing `BUG_ENABLED` from `"true"` to `"false"`, and opens a PR linking
 > the traces to the fix. **Merge the PR** — `deploy-on-merge.yml` auto-deploys
@@ -51,7 +54,7 @@ Usa el MCP de GitHub para crear un PR en albert0fg/grafana-demo-orderservice que
 
 ## Prompt 5
 
-Usando las span metrics de Prometheus, muestra la latencia p99 de order-service agrupada por service_version para comparar antes y después del fix.
+Using Prometheus span metrics, show me p99 latency for order-service grouped by service_version to compare before and after the fix.
 
 > **What happens:** Assistant queries:
 > ```promql
@@ -74,6 +77,6 @@ Usando las span metrics de Prometheus, muestra la latencia p99 de order-service 
 ## After the Demo
 
 ```bash
-./deploy.sh --reset   # re-enable bug for next run (~5 seconds)
+./deploy.sh --reset   # auto-opens restore PR (admin merge) + re-enables bug in cluster
 ./demo-check.sh       # verify ready
 ```

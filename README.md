@@ -1,8 +1,16 @@
 # Grafana Cloud Demo — Order Service N+1 Bug
 
-High-impact demo: Grafana Assistant receives a firing alert, investigates an
-N+1 query bug across 3 microservices, and opens a GitHub PR to fix it —
-entirely inside Grafana Cloud.
+A high-impact, fully reproducible demo: a Grafana alert fires on a real latency
+spike, **Grafana Assistant** investigates traces and span metrics across three
+microservices, identifies an N+1 query bug, and opens a GitHub PR with the
+fix. The PR merge triggers an automated deploy, span metrics show the latency
+drop grouped by `service.version`, and a single command resets everything for
+the next run.
+
+Everything lives inside Grafana Cloud + your own Kubernetes cluster + your own
+fork of this repo. Roughly 15 minutes end-to-end.
+
+---
 
 ## The Scenario
 
@@ -18,26 +26,7 @@ to `inventory-service` (one per item) instead of a single batch call.
 A Grafana alert fires when `frontend-api` p99 checkout latency > 300ms.
 Grafana Assistant diagnoses the root cause from traces and opens the fix PR.
 
-## Quick Start
-
-```bash
-# 0. Pre-demo readiness check (pods, bug flag, latency, alert state)
-./demo-check.sh
-
-# 1. Deploy (first time)
-./deploy.sh
-
-# 2. After demo — reset for next run (5 seconds, no rebuild)
-./deploy.sh --reset
-
-# 3. Teardown
-./deploy.sh --teardown
-```
-
-## Demo Guide
-
-See [`demo/DEMO_SCRIPT.md`](demo/DEMO_SCRIPT.md) for the full step-by-step.  
-See [`demo/GRAFANA_ASSISTANT_PROMPTS.md`](demo/GRAFANA_ASSISTANT_PROMPTS.md) for copy-paste prompts.
+---
 
 ## Architecture
 
@@ -45,55 +34,227 @@ See [`demo/GRAFANA_ASSISTANT_PROMPTS.md`](demo/GRAFANA_ASSISTANT_PROMPTS.md) for
 load-generator (3 RPS, 50% to order-6)
       │
       ▼
-frontend-api  ──────────────────────────────┐
-      │                                     │
-      ▼                                     │
-order-service  ──(N calls, buggy)──▶  inventory-service
-                ──(1 batch, fixed)──▶  inventory-service
+frontend-api ──────────────────────────────┐
+      │                                    │
+      ▼                                    │
+order-service ──(N calls, buggy)──▶ inventory-service
+              ──(1 batch, fixed)──▶ inventory-service
 
-Each service exports OTLP traces + metrics via gRPC → Alloy → Grafana Cloud
+Each service exports OTLP traces + metrics → Alloy (k8s-monitoring) → Grafana Cloud
 ```
 
-## Services
+The bug is controlled by a single env var (`BUG_ENABLED`) in
+[`k8s/order-service.yaml`](k8s/order-service.yaml). Flipping it `true`↔`false`
+is the entire fix — no rebuild, no migration.
 
-| Service | Role | Bug |
-|---------|------|-----|
-| `frontend-api` | Gateway, exposes `/checkout/{order_id}` | — |
-| `order-service` | Fetches order + items; `BUG_ENABLED` env var controls N+1 | ✓ |
-| `inventory-service` | Item catalog; has `/items/{id}` (slow) and `/items/batch` (fast) | — |
-| `load-generator` | Generates 3 RPS; 50% traffic to order-6 (10 items) | — |
+---
 
-## The Bug
+## Prerequisites
 
-```python
-# BUG (BUG_ENABLED=true): N calls × ~80ms = N×80ms
-for item_id in order["item_ids"]:
-    r = await client.get(f"{INVENTORY_URL}/items/{item_id}")
+**Tools on your machine**
 
-# FIX (BUG_ENABLED=false): 1 call × ~80ms = ~80ms regardless of N
-r = await client.get(f"{INVENTORY_URL}/items/batch?ids={','.join(item_ids)}")
+- `kubectl` against a cluster where you have permissions to create namespaces
+- `gh` (GitHub CLI), logged in to a user with admin rights on your fork
+- `gcx` ([Grafana Cloud CLI](https://github.com/grafana/gcx)), authenticated against your stack
+- `envsubst` (ships with `gettext`; macOS: `brew install gettext`)
+- `python3` (used by helper scripts)
+
+**Grafana Cloud**
+
+- A Grafana Cloud stack
+- Grafana Cloud k8s Monitoring (Alloy + spanmetrics processor) installed in
+  your cluster — `order-service`, `frontend-api`, etc. must produce
+  `traces_spanmetrics_latency_bucket` metrics
+- A Service Account with **Editor** scope, token saved into your `gcx` config
+  (`gcx auth …` or hand-rolled `~/.config/gcx/config.yaml`)
+
+**GitHub**
+
+- A fork of this repo under your user/org
+- Branch protection on `main` (so PRs are the only path) — this is what
+  makes the demo realistic. The `--reset` flow uses `gh pr merge --admin`
+  to bypass it, so your user needs admin on the repo.
+
+---
+
+## Setup
+
+### 1. Fork and clone
+
+```bash
+gh repo fork grafana-demo-orderservice --clone --remote
+cd grafana-demo-orderservice
 ```
+
+### 2. Configure `.env`
+
+```bash
+cp .env.example .env
+$EDITOR .env
+```
+
+Fill in:
+
+| Variable | What |
+|---|---|
+| `GITHUB_OWNER` | Your fork's owner |
+| `GITHUB_REPO` | `grafana-demo-orderservice` (unless you renamed it) |
+| `GHCR_IMAGE_PREFIX` | `ghcr.io/${GITHUB_OWNER}/${GITHUB_REPO}` (default works) |
+| `GRAFANA_HOST` | e.g. `acme.grafana.net` (no protocol) |
+| `GCX_CONTEXT` | Your `gcx` context name (`gcx config get-contexts`) |
+| `ALERT_RULE_UID` | Stable UID for the demo alert (default `order-svc-checkout-latency`) |
+| `DASHBOARD_UID` | Stable UID for the demo dashboard (default `order-service-n-plus-one-demo`) |
+
+`.env` is git-ignored — your values stay local.
+
+### 3. Configure GitHub repo (Settings → Secrets and variables → Actions)
+
+**Repository variables**
+
+| Name | Example value |
+|---|---|
+| `GRAFANA_HOST` | `acme.grafana.net` |
+| `DASHBOARD_UID` | `order-service-n-plus-one-demo` |
+
+**Repository secrets**
+
+| Name | What |
+|---|---|
+| `KUBECONFIG` | Base64-encoded kubeconfig (`base64 -i ~/.kube/config \| pbcopy`). Used by `deploy-on-merge.yml` |
+| `GRAFANA_SA_TOKEN` | Grafana Cloud SA token with Editor scope. Used to post "Fix deployed" annotations |
+
+> The `build-push.yml` workflow uses the built-in `GITHUB_TOKEN` to push images to your fork's GHCR — no extra setup.
+
+### 4. Deploy
+
+```bash
+./deploy.sh
+```
+
+This:
+- Creates the `grafana-demo` namespace
+- Renders k8s manifests with envsubst (substituting `${GHCR_IMAGE_PREFIX}`) and applies them
+- Waits for all 4 deployments to roll out
+- Provisions the dashboard via `gcx` (folder `Order Service Demo`)
+
+> **First-time deploy:** images are pulled from your GHCR. The first push of
+> `main` triggers `build-push.yml` which publishes `:latest` for each service.
+> If you've just forked and pushed for the first time, wait for that workflow
+> to complete before running `./deploy.sh`, or you'll get `ImagePullBackOff`.
+
+### 5. Import the alert rule
+
+The dashboard is provisioned automatically by `./deploy.sh`. The alert rule is
+exported in [`grafana/alert-checkout-latency.json`](grafana/alert-checkout-latency.json)
+and needs to be imported once:
+
+```bash
+# Replace ${GRAFANA_HOST} in the runbook URL with your host before import,
+# then create the alert rule via gcx (or the Grafana UI → Alerting → Import).
+envsubst < grafana/alert-checkout-latency.json > /tmp/alert.json
+gcx alert-rules create -f /tmp/alert.json
+```
+
+The rule's `uid` is stable (`order-svc-checkout-latency` by default — matches
+`ALERT_RULE_UID` in your `.env`) so `demo-check.sh` can reference it directly.
+
+---
+
+## Running the demo
+
+```bash
+./demo-check.sh
+```
+
+Four checks must pass: pods Running, `BUG_ENABLED=true` confirmed via `/health`,
+order-6 latency > 800ms, alert Firing. The script prints fully-resolved
+quick-access URLs (alert, dashboard, App Observability) and posts a
+`Demo started` annotation to the dashboard so the before/after timeline has
+a clear start marker.
+
+Then follow [`demo/DEMO_SCRIPT.md`](demo/DEMO_SCRIPT.md) — 4 acts, ~15 min:
+
+1. **The alert** — show the firing alert in Grafana
+2. **Root cause with Assistant** — Prompts 1–3 from `demo/GRAFANA_ASSISTANT_PROMPTS.md`
+3. **Fix via GitHub MCP** — Prompt 4: Assistant opens a PR flipping `BUG_ENABLED` to `false`. **Merge it.** The `deploy-on-merge.yml` workflow auto-applies the manifest and posts a "Fix deployed" annotation.
+4. **Confirm improvement** — Prompt 5: span metrics grouped by `service.version` show the 10× drop
+
+---
+
+## Reset between runs
+
+```bash
+./deploy.sh --reset
+```
+
+What happens:
+
+1. If `main` has `BUG_ENABLED=false` (because the Assistant's fix PR just
+   landed), the script opens an automated `restore/re-enable-bug-<ts>` PR
+   and merges it with `gh pr merge --admin --squash`. Idempotent — no-op
+   if `main` is already in the reset state.
+2. Re-renders and applies `k8s/order-service.yaml` against the cluster
+3. Stamps a new `SERVICE_VERSION` (the new short SHA) and forces a rollout restart
+4. Posts a `Demo reset` annotation to the dashboard
+
+Repo and cluster are kept in lockstep — no out-of-band patching.
+
+---
+
+## How the deploy loop works
+
+```
+main (BUG_ENABLED=true) ────────────────────────────────────┐
+                                                            │
+  ./demo-check.sh  ──▶ "Demo started" annotation             │
+  AI Assistant creates fix PR (BUG_ENABLED=true → false)     │
+       │                                                    │
+       merge                                                 │
+       ▼                                                    │
+  .github/workflows/deploy-on-merge.yml                      │
+       ├─ guard: only deploy if BUG_ENABLED is false/absent  │
+       ├─ kubectl apply k8s/order-service.yaml               │
+       ├─ kubectl set env SERVICE_VERSION=<sha>-fix          │
+       ├─ kubectl rollout restart                            │
+       └─ POST "Fix deployed" annotation                     │
+                                                            │
+  ./deploy.sh --reset ──▶ auto-PR restore (admin merge) ─────┘
+                          + kubectl apply + new SERVICE_VERSION
+                          + "Demo reset" annotation
+```
+
+---
 
 ## Telemetry
 
 | Signal | What it shows |
-|--------|--------------|
+|--------|---------------|
 | Prometheus | p99 latency spike on `frontend-api`; alert fires after 1 min |
 | Tempo | Waterfall of N sequential `GET /items/{id}` spans per request |
 | App Observability | Service map: frontend-api → order-service → inventory-service |
-| `service.version` | Short git SHA (`e856bee`) before fix; `e856bee-fix` after |
+| `service.version` label | Short git SHA before fix; `<sha>-fix` after |
+| Dashboard annotations | `Demo started`, `Fix deployed`, `Demo reset` mark each phase |
 
-## Alert
+---
 
-Rule: **frontend-api checkout latency alta** (folder: Order Service Demo)  
-Condition: p99 of `GET /checkout/{order_id}` > 300ms for 1 minute  
-Notification: `alberto@grafana.com`
+## Files of interest
 
-## Resetting After a Demo Run
+- [`services/order-service/main.py`](services/order-service/main.py) — the N+1 toggle
+- [`k8s/order-service.yaml`](k8s/order-service.yaml) — the `BUG_ENABLED` env var
+- [`.github/workflows/build-push.yml`](.github/workflows/build-push.yml) — builds images to your GHCR
+- [`.github/workflows/deploy-on-merge.yml`](.github/workflows/deploy-on-merge.yml) — auto-deploys fix PRs
+- [`deploy.sh`](deploy.sh) — single entry point (deploy / reset / teardown)
+- [`demo-check.sh`](demo-check.sh) — pre-demo readiness checks
+- [`grafana/dashboard-order-service.json`](grafana/dashboard-order-service.json) — demo dashboard (auto-provisioned)
+- [`grafana/alert-checkout-latency.json`](grafana/alert-checkout-latency.json) — alert rule (manual import once)
 
-The `deploy-on-merge.yml` workflow auto-deploys the fix when the PR is merged.
-To run the demo again:
+---
+
+## Teardown
 
 ```bash
-./deploy.sh --reset   # patches BUG_ENABLED=true back, ~5 seconds
+./deploy.sh --teardown   # deletes the grafana-demo namespace
 ```
+
+The dashboard and alert rule in Grafana Cloud stay — delete them via UI or
+`gcx` if you want a fully clean state.

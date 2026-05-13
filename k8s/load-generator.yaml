@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: load-generator
-          image: ghcr.io/albert0fg/grafana-demo-orderservice/load-generator:latest
+          image: ${GHCR_IMAGE_PREFIX}/load-generator:latest
           env:
             - name: FRONTEND_URL
               value: "http://frontend-api:8080"
