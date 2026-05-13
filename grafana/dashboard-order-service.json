@@ -1,6 +1,6 @@
 {
   "title": "Order Service Demo — N+1 Bug",
-  "uid": "order-service-n-plus-one-demo",
+  "uid": "${DASHBOARD_UID}",
   "tags": ["demo", "order-service", "n+1"],
   "timezone": "browser",
   "refresh": "10s",

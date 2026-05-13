@@ -168,10 +168,13 @@ case "${1:-}" in
     echo ""
     echo "Provisioning Grafana dashboard..."
     if command -v gcx &>/dev/null; then
-      gcx dashboards create -f "$GRAFANA_DIR/dashboard-order-service.json" \
+      rendered=$(mktemp /tmp/dashboard-XXXXXX.json)
+      envsubst '${DASHBOARD_UID}' < "$GRAFANA_DIR/dashboard-order-service.json" > "$rendered"
+      gcx dashboards create -f "$rendered" \
         --folder-name "Order Service Demo" --upsert 2>/dev/null && \
-        echo "Dashboard provisioned in folder 'Order Service Demo'." || \
+        echo "Dashboard provisioned in folder 'Order Service Demo' (uid=${DASHBOARD_UID})." || \
         echo "Warning: dashboard provisioning failed (gcx not configured?) — skipping."
+      rm -f "$rendered"
     else
       echo "Warning: gcx not found — skipping dashboard provisioning."
     fi

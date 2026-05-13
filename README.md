@@ -102,8 +102,8 @@ Fill in:
 | `GHCR_IMAGE_PREFIX` | `ghcr.io/${GITHUB_OWNER}/${GITHUB_REPO}` (default works) |
 | `GRAFANA_HOST` | e.g. `acme.grafana.net` (no protocol) |
 | `GCX_CONTEXT` | Your `gcx` context name (`gcx config get-contexts`) |
-| `ALERT_RULE_UID` | Stable UID for the demo alert (default `order-svc-checkout-latency`) |
-| `DASHBOARD_UID` | Stable UID for the demo dashboard (default `order-service-n-plus-one-demo`) |
+| `ALERT_RULE_UID` | Any stable string you want for the alert UID. Default `order-svc-checkout-latency`. Whatever you put here ends up as the rule's `uid` in Grafana and in the URLs printed by `demo-check.sh` |
+| `DASHBOARD_UID` | Same, for the dashboard. Default `order-service-n-plus-one-demo` |
 
 `.env` is git-ignored — your values stay local.
 
@@ -144,19 +144,20 @@ This:
 
 ### 5. Import the alert rule
 
-The dashboard is provisioned automatically by `./deploy.sh`. The alert rule is
-exported in [`grafana/alert-checkout-latency.json`](grafana/alert-checkout-latency.json)
-and needs to be imported once:
+The dashboard is provisioned automatically by `./deploy.sh` (rendered with
+your `DASHBOARD_UID`). The alert rule is exported in
+[`grafana/alert-checkout-latency.json`](grafana/alert-checkout-latency.json)
+and needs to be imported once. Its `uid`, `runbook_url`, etc. are templated
+on your `.env`:
 
 ```bash
-# Replace ${GRAFANA_HOST} in the runbook URL with your host before import,
-# then create the alert rule via gcx (or the Grafana UI → Alerting → Import).
-envsubst < grafana/alert-checkout-latency.json > /tmp/alert.json
-gcx alert-rules create -f /tmp/alert.json
+set -a; . ./.env; set +a
+envsubst < grafana/alert-checkout-latency.json | gcx alert-rules create -f -
 ```
 
-The rule's `uid` is stable (`order-svc-checkout-latency` by default — matches
-`ALERT_RULE_UID` in your `.env`) so `demo-check.sh` can reference it directly.
+The UID created in Grafana is exactly what you set in `ALERT_RULE_UID` —
+change it to whatever you want, the scripts will follow. Same for
+`DASHBOARD_UID`.
 
 ---
 

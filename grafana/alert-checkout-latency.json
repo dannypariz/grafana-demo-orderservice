@@ -1,5 +1,5 @@
 {
-  "uid": "order-svc-checkout-latency",
+  "uid": "${ALERT_RULE_UID}",
   "orgID": 1,
   "folderUID": "order-service-demo",
   "ruleGroup": "latency",
