@@ -168,9 +168,11 @@ The rule's `uid` is stable (`order-svc-checkout-latency` by default — matches
 
 Four checks must pass: pods Running, `BUG_ENABLED=true` confirmed via `/health`,
 order-6 latency > 800ms, alert Firing. The script prints fully-resolved
-quick-access URLs (alert, dashboard, App Observability) and posts a
-`Demo started` annotation to the dashboard so the before/after timeline has
-a clear start marker.
+quick-access URLs (alert, dashboard, App Observability).
+
+> Only deploy/reset events post dashboard annotations — `demo-check.sh` is
+> read-only. Look for `Demo reset` (orange) and `Fix deployed` (green) markers
+> on the timeline.
 
 Then follow [`demo/DEMO_SCRIPT.md`](demo/DEMO_SCRIPT.md) — 4 acts, ~15 min:
 
@@ -206,7 +208,7 @@ Repo and cluster are kept in lockstep — no out-of-band patching.
 ```
 main (BUG_ENABLED=true) ────────────────────────────────────┐
                                                             │
-  ./demo-check.sh  ──▶ "Demo started" annotation             │
+  ./demo-check.sh   (read-only: validates state, prints URLs) │
   AI Assistant creates fix PR (BUG_ENABLED=true → false)     │
        │                                                    │
        merge                                                 │
@@ -233,7 +235,7 @@ main (BUG_ENABLED=true) ──────────────────�
 | Tempo | Waterfall of N sequential `GET /items/{id}` spans per request |
 | App Observability | Service map: frontend-api → order-service → inventory-service |
 | `service.version` label | Short git SHA before fix; `<sha>-fix` after |
-| Dashboard annotations | `Demo started`, `Fix deployed`, `Demo reset` mark each phase |
+| Dashboard annotations | `Fix deployed` and `Demo reset` mark each deploy event on the timeline |
 
 ---
 

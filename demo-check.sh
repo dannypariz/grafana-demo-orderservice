@@ -156,24 +156,6 @@ if [ "$FAIL" -eq 0 ]; then
   echo ""
   echo "  Start with: \"There's a critical alert firing, investigate what's happening.\""
   echo ""
-  # Mark demo start on the dashboard timeline
-  if command -v gcx &>/dev/null; then
-    f=$(mktemp /tmp/gcx-anno-XXXXXX.yaml)
-    cat > "$f" <<YAML
-apiVersion: annotations.grafana.app/v1
-kind: Annotation
-metadata:
-  name: "demo-start-$(date +%s)"
-spec:
-  dashboardUID: ${DASHBOARD_UID}
-  tags: [demo, start]
-  text: "Demo started"
-  time: $(date +%s)000
-YAML
-    gcx annotations create -f "$f" 2>/dev/null && \
-      printf '\033[0;32m  ✓ "Demo started" annotation posted to dashboard\033[0m\n' || true
-    rm -f "$f"
-  fi
 else
   printf '\033[0;31m  ✗ Not ready — %d check(s) failed, %d passed\033[0m\n' "$FAIL" "$PASS"
   echo "  Fix the issues above before starting the demo."
