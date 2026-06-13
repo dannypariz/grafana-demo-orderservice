@@ -1,24 +1,24 @@
-name: Deploy Fix on PR Merge
+name: Deploy Fix on Merge to main
 
+# Fires whenever order-service code or its manifest lands on main (a PR merge or a
+# direct push), plus a manual trigger for testing/demos. We key off `push` rather than
+# `pull_request: closed` because push fires reliably regardless of how the merge was
+# performed (GitHub UI, REST API, or CLI) — pull_request events can silently no-op.
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches:
       - main
     paths:
       - 'k8s/order-service.yaml'
       - 'services/order-service/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   deploy-fix:
-    # Fire on any merged PR that touches order-service code or manifest
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout repository
@@ -34,7 +34,7 @@ jobs:
             echo "BUG_ENABLED=false confirmed in manifest — proceeding with deploy"
             echo "should_deploy=true" >> "$GITHUB_OUTPUT"
           else
-            echo "BUG_ENABLED is still true in manifest — skipping deploy"
+            echo "BUG_ENABLED is still true in manifest — skipping deploy (likely a reset commit)"
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -92,18 +92,6 @@ jobs:
           curl -sf -X POST \
             -H "Authorization: Bearer $GRAFANA_SA_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"dashboardUID\":\"${DASHBOARD_UID}\",\"tags\":[\"demo\",\"fix\"],\"text\":\"Fix deployed — service.version=${SHORT_SHA}-fix (PR #${{ github.event.pull_request.number }})\",\"time\":${NOW_MS}}" \
+            -d "{\"dashboardUID\":\"${DASHBOARD_UID}\",\"tags\":[\"demo\",\"fix\"],\"text\":\"Fix deployed — service.version=${SHORT_SHA}-fix (commit ${SHORT_SHA})\",\"time\":${NOW_MS}}" \
             "https://${GRAFANA_HOST}/api/annotations" \
             && echo "Grafana annotation posted." || echo "Annotation failed (non-fatal)"
-
-      - name: Comment on PR
-        if: steps.guard.outputs.should_deploy == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '✅ **Fix deployed to production** — manifest applied + new `service.version` stamped. Latency should drop from ~950ms to ~100ms. Check App Observability to compare `service.version` before/after.'
-            })
