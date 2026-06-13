@@ -73,5 +73,3 @@ spec:
       targetPort: 8080
       protocol: TCP
   type: ClusterIP
-
-# ci-trigger-test: validate push-to-main fires deploy workflow (guard skips while BUG_ENABLED=true)
